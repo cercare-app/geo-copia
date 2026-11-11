@@ -1,0 +1,95 @@
+name: Copia OpenStreetMap
+
+# Lotto «Valutazione 3» (D-VAL-70, D-VAL-82, D-VAL-84, D-VAL-88, D-VAL-92) — tutto automatico:
+#  - parte da sola appena questo file arriva su GitHub, poi ogni trimestre:
+#    il 5 di gennaio, aprile, luglio e ottobre alle 03:00 UTC (le 4 d'inverno, le 5 con l'ora legale);
+#  - le cinque regioni di Geofabrik insieme: ognuna si scarica, si converte, si pesa e,
+#    sotto la soglia, va su reesty; il servizio la controlla e la mette al suo posto
+#    (la precedente resta come scorta). Se una regione non va, diventa rossa solo lei.
+# Il pulsante «Run workflow» resta per lanciarla quando serve, anche per una regione sola
+# o in sola misura. Repository pubblico: i minuti non si contano. I registri li può leggere
+# chiunque: qui non si stampano mai indirizzi, utenti o chiavi.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'converti.py'
+      - 'cliente.py'
+      - 'carica.sh'
+      - 'fai-regione.sh'
+      - '.github/workflows/copia-osm.yml'
+  schedule:
+    - cron: '0 3 5 1,4,7,10 *'
+  workflow_dispatch:
+    inputs:
+      regioni:
+        description: 'Regioni, separate da spazi'
+        required: true
+        default: 'centro isole nord-est nord-ovest sud'
+      carica:
+        description: 'Caricare su reesty (togli la spunta per la sola misura)'
+        type: boolean
+        default: true
+
+concurrency:
+  group: copia-osm
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  elenco:
+    runs-on: ubuntu-latest
+    outputs:
+      regioni: ${{ steps.r.outputs.regioni }}
+    steps:
+      - id: r
+        env:
+          SCELTE: ${{ inputs.regioni || vars.GEO_REGIONI || 'centro isole nord-est nord-ovest sud' }}
+        run: |
+          python3 -c "
+          import json, os, re, sys
+          r = [x for x in os.environ['SCELTE'].split() if re.fullmatch(r'[a-z0-9][a-z0-9-]{1,40}', x)]
+          if not r: sys.exit('FERMO: nessuna regione valida')
+          print('regioni=' + json.dumps(r))
+          " >> "$GITHUB_OUTPUT"
+
+  regione:
+    needs: elenco
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        regione: ${{ fromJSON(needs.elenco.outputs.regioni) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Strumenti
+        run: pip install --quiet 'osmium>=4,<5'
+
+      - name: Copia della regione
+        env:
+          CARICA: ${{ github.event_name != 'workflow_dispatch' || inputs.carica }}
+          GEO_FTP_HOST: ${{ secrets.GEO_FTP_HOST }}
+          GEO_FTP_UTENTE: ${{ secrets.GEO_FTP_UTENTE }}
+          GEO_FTP_PASSWORD: ${{ secrets.GEO_FTP_PASSWORD }}
+          GEO_CHIAVE: ${{ secrets.GEO_CHIAVE }}
+          GEO_SITO: ${{ vars.GEO_SITO }}
+          GEO_CARTELLE: ${{ vars.GEO_CARTELLE }}
+          GEO_DATI: ${{ vars.GEO_DATI }}
+          GEO_FTP_RADICE: ${{ vars.GEO_FTP_RADICE }}
+          GEO_FTP_TLS: ${{ vars.GEO_FTP_TLS }}
+          GEO_PESO_MAX_GB: ${{ vars.GEO_PESO_MAX_GB }}
+        # i file caricati dal sito di GitHub possono avere gli a capo di Windows: per bash si tolgono
+        run: |
+          sed -i 's/\r$//' ./*.sh
+          bash fai-regione.sh "${{ matrix.regione }}"
