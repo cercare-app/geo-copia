@@ -1,0 +1,58 @@
+name: Fibra AGCOM
+
+# Lotto «Valutazione 3» (D-VAL-72, D-VAL-90): un'edizione nuova della fibra di AGCOM su reesty.
+# Si lancia a mano («Run workflow») quando arriva l'email di AGCOM, con UNA delle due strade:
+#  - il link scritto nell'email;
+#  - oppure il nome del file caricato dal File Manager di Aruba in geo/dati/arrivi.
+# Apre l'archivio, controlla che sia la fibra che il sito sa leggere, la carica e la mette al
+# suo posto: la fibra di prima resta come scorta. Repository pubblico: il link scritto qui
+# si legge nel registro della corsa.
+
+on:
+  workflow_dispatch:
+    inputs:
+      edizione:
+        description: 'Edizione (per esempio Q3 2026)'
+        required: true
+      link:
+        description: 'Link del file nell''email di AGCOM (oppure lascia vuoto)'
+        required: false
+        default: ''
+      file:
+        description: 'Oppure: nome del file caricato in geo/dati/arrivi su reesty'
+        required: false
+        default: ''
+
+concurrency:
+  group: fibra-agcom
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  fibra:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: La fibra nuova su reesty
+        env:
+          EDIZIONE: ${{ inputs.edizione }}
+          LINK: ${{ inputs.link }}
+          FILE: ${{ inputs.file }}
+          GEO_FTP_HOST: ${{ secrets.GEO_FTP_HOST }}
+          GEO_FTP_UTENTE: ${{ secrets.GEO_FTP_UTENTE }}
+          GEO_FTP_PASSWORD: ${{ secrets.GEO_FTP_PASSWORD }}
+          GEO_CHIAVE: ${{ secrets.GEO_CHIAVE }}
+          GEO_SITO: ${{ vars.GEO_SITO }}
+          GEO_CARTELLE: ${{ vars.GEO_CARTELLE }}
+          GEO_DATI: ${{ vars.GEO_DATI }}
+          GEO_FTP_RADICE: ${{ vars.GEO_FTP_RADICE }}
+          GEO_FTP_TLS: ${{ vars.GEO_FTP_TLS }}
+        # i file caricati dal sito di GitHub possono avere gli a capo di Windows: per bash si tolgono
+        run: |
+          sed -i 's/\r$//' ./*.sh
+          bash fai-fibra.sh
