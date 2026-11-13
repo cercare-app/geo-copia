@@ -8,6 +8,10 @@ con gli stessi strati, le stesse colonne e la stessa data. Servono a
 provare le mappe del report su posti veri prima di consegnarle: non vanno
 né sul sito né su reesty, restano fra i file scaricabili della corsa.
 
+Lotto «Valutazione 5»: i luoghi si ritagliano in un quadrato più grande
+(12 km di lato) e gli aeroporti in uno di 300 km, perché la verifica dei
+dintorni cerca stazioni fino a 6 km e aeroporti fino a 120 km.
+
 Un posto che non sta in questa regione non dà niente (nessun file).
 Non ferma mai la copia: se qualcosa non va, lo scrive e finisce.
 
@@ -27,6 +31,7 @@ import sys
 from converti import Scrittore
 
 INVOLUCRO = {0: 0, 1: 32, 2: 48, 3: 48, 4: 64}  # byte del riquadro nell'intestazione del GeoPackage
+LATI = {'luoghi': 12.0, 'aeroporti': 300.0}  # strati col loro lato minimo, in km
 
 
 def posti(percorso):
@@ -97,11 +102,12 @@ def main():
         return 0
 
     for nome, lat, lon in posti(elenco):
-        mezzo_lat = (lato / 2) / 110.574
-        mezzo_lon = (lato / 2) / (111.320 * math.cos(math.radians(lat)))
-        ovest, sud, est, nord = lon - mezzo_lon, lat - mezzo_lat, lon + mezzo_lon, lat + mezzo_lat
         righe = {}
         for strato, (_, colonne) in strati.items():
+            lato_strato = max(lato, LATI.get(strato, 0.0))
+            mezzo_lat = (lato_strato / 2) / 110.574
+            mezzo_lon = (lato_strato / 2) / (111.320 * math.cos(math.radians(lat)))
+            ovest, sud, est, nord = lon - mezzo_lon, lat - mezzo_lat, lon + mezzo_lon, lat + mezzo_lat
             elenco_colonne = ', '.join('t."%s"' % c for c, _ in colonne)
             sql = ('SELECT t.geom%s FROM "%s" t JOIN "rtree_%s_geom" r ON t.fid = r.id '
                    'WHERE r.maxx >= ? AND r.minx <= ? AND r.maxy >= ? AND r.miny <= ? ORDER BY t.fid'

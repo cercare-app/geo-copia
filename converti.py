@@ -14,6 +14,8 @@ longitudine (EPSG:4326):
   verde        poligoni   id, nome, tipo
   ferrovie     linee      id, tipo, galleria, livello
   confini      poligoni   id, nome, istat   (comuni: admin_level 8)
+  luoghi       punti      id, osm, chiave, nome, gestore, etichette
+  aeroporti    punti      id, osm, nome, nome_it, iata
 
 Lotto «Valutazione 4» (D-VAL-94): il tipo di edificio (per togliere
 tettoie e pensiline dalla vista dall'alto), i piani del tetto, gli altri
@@ -21,9 +23,18 @@ nomi delle vie (nome italiano, tedesco, ufficiale…, separati da «;»: per
 trovare la via dell'indirizzo), la galleria e il livello di strade e
 ferrovie (per disegnare le gallerie più chiare), i campi sportivi nel verde.
 
+Lotto «Valutazione 5» (D-VAL-116): i luoghi dei dintorni (negozi,
+farmacie, scuole, fermate, stazioni…) e gli aeroporti, come punti. Non
+servono alle mappe né al report, che prende i luoghi da Geoapify: sono il
+riferimento della verifica dei dintorni, che confronta Geoapify con
+OpenStreetMap. Un luogo disegnato come area (un supermercato col suo
+edificio) diventa il punto al centro dell'area. In «etichette» stanno le
+etichette OpenStreetMap che servono a riconoscere la categoria
+(«railway=station;station=subway»), così le regole si decidono sul sito
+e non qui.
+
 Scrive anche conteggi.json (oggetti per strato), che il servizio su reesty
-ricontrolla prima di usare il file. Niente luoghi e negozi: i dintorni
-vengono da un'altra fonte (lotto 5). Dati © contributori OpenStreetMap,
+ricontrolla prima di usare il file. Dati © contributori OpenStreetMap,
 licenza ODbL.
 
 Uso: python3 converti.py ESTRATTO.osm.pbf USCITA.gpkg CONTEGGI.json
@@ -52,6 +63,8 @@ STRATI = {
     'verde': ('MULTIPOLYGON', [('id', 'INTEGER'), ('nome', 'TEXT'), ('tipo', 'TEXT')]),
     'ferrovie': ('LINESTRING', [('id', 'INTEGER'), ('tipo', 'TEXT'), ('galleria', 'TEXT'), ('livello', 'INTEGER')]),
     'confini': ('MULTIPOLYGON', [('id', 'INTEGER'), ('nome', 'TEXT'), ('istat', 'TEXT')]),
+    'luoghi': ('POINT', [('id', 'INTEGER'), ('osm', 'TEXT'), ('chiave', 'TEXT'), ('nome', 'TEXT'), ('gestore', 'TEXT'), ('etichette', 'TEXT')]),
+    'aeroporti': ('POINT', [('id', 'INTEGER'), ('osm', 'TEXT'), ('nome', 'TEXT'), ('nome_it', 'TEXT'), ('iata', 'TEXT')]),
 }
 
 STRADE_NO = {'proposed', 'construction', 'abandoned', 'platform', 'raceway', 'bus_stop', 'elevator', 'corridor', 'razed'}
@@ -63,6 +76,23 @@ VERDE_NATURAL = {'wood', 'scrub', 'grassland', 'heath'}
 
 # gli altri nomi di una via, in quest'ordine (alt_name e simili possono averne più d'uno, separati da «;»)
 ALTRI_NOMI = ('name:it', 'name:de', 'name:lld', 'name:fr', 'name:sl', 'official_name', 'alt_name', 'short_name', 'loc_name', 'old_name')
+
+# I LUOGHI (lotto 5): chiave OpenStreetMap → valori tenuti. Tutte le
+# categorie dei dintorni, delle schede e del report; la categoria la
+# decide il sito, leggendo «chiave» ed «etichette».
+LUOGHI = {
+    'shop': {'supermarket', 'convenience', 'greengrocer', 'bakery'},
+    'amenity': {'pharmacy', 'school', 'kindergarten', 'hospital', 'bank', 'restaurant', 'cafe', 'bar', 'pub'},
+    'highway': {'bus_stop'},
+    'railway': {'station', 'halt', 'tram_stop', 'subway_entrance'},
+    'public_transport': {'station'},
+    'station': {'subway'},
+    'leisure': {'park', 'playground', 'beach_resort'},
+    'natural': {'beach'},
+}
+# le etichette che si conservano per riconoscere la categoria (in quest'ordine)
+ETICHETTE = ('amenity', 'shop', 'highway', 'railway', 'public_transport', 'station', 'subway', 'train', 'light_rail',
+             'tram', 'bus', 'leisure', 'natural', 'dispensing', 'healthcare', 'brand')
 
 LOTTO = 20000
 
@@ -107,6 +137,52 @@ def livello(t):
     except ValueError:
         return None
     return v if -10 <= v <= 10 else None
+
+
+def chiave_luogo(t):
+    """La prima etichetta che fa del posto un luogo dei dintorni («amenity=pharmacy»); altrimenti None."""
+    for chiave, valori in LUOGHI.items():
+        v = t.get(chiave)
+        if v in valori:
+            return '%s=%s' % (chiave, v)
+    return None
+
+
+def etichette_luogo(t):
+    parti = []
+    for chiave in ETICHETTE:
+        v = (t.get(chiave) or '').strip()
+        if v:
+            parti.append('%s=%s' % (chiave, v[:60].replace(';', ',')))
+    return ';'.join(parti)[:400] or None
+
+
+def testo(t, chiave, lunghezza=200):
+    v = (t.get(chiave) or '').strip()
+    return v[:lunghezza] if v else None
+
+
+def iata(t):
+    """Il codice IATA (tre lettere maiuscole); altrimenti None."""
+    v = (t.get('iata') or '').strip().upper()
+    return v if len(v) == 3 and v.isalpha() and v.isascii() else None
+
+
+def centro(anello):
+    """Il baricentro di un anello chiuso (formula dell'area); per un anello degenere, la media dei punti."""
+    a = cx = cy = 0.0
+    for (x0, y0), (x1, y1) in zip(anello, anello[1:]):
+        f = x0 * y1 - x1 * y0
+        a += f
+        cx += (x0 + x1) * f
+        cy += (y0 + y1) * f
+    if abs(a) < 1e-14:
+        return (sum(p[0] for p in anello) / len(anello), sum(p[1] for p in anello) / len(anello))
+    return (cx / (3 * a), cy / (3 * a))
+
+
+def wkb_punto(x, y):
+    return struct.pack('<BIdd', 1, 1, x, y)
 
 
 def wkb_linea(punti):
@@ -224,6 +300,20 @@ class Lettore(osmium.SimpleHandler):
             punti.append((round(n.location.lon, 7), round(n.location.lat, 7)))
         return punti if len(punti) >= 2 else None
 
+    def luogo(self, t, ident, osm, x, y):
+        x, y = round(x, 7), round(y, 7)
+        if t.get('aeroway') == 'aerodrome':
+            self.s.aggiungi('aeroporti', (x, y, x, y), wkb_punto(x, y), (ident, osm, testo(t, 'name'), testo(t, 'name:it'), iata(t)))
+        chiave = chiave_luogo(t)
+        if chiave is not None:
+            self.s.aggiungi('luoghi', (x, y, x, y), wkb_punto(x, y), (ident, osm, chiave, testo(t, 'name'), testo(t, 'operator'), etichette_luogo(t)))
+
+    def node(self, n):
+        t = n.tags
+        if len(t) == 0 or not n.location.valid():
+            return
+        self.luogo(t, n.id, 'n', n.location.lon, n.location.lat)
+
     def way(self, w):
         t = w.tags
         strada = t.get('highway')
@@ -256,7 +346,8 @@ class Lettore(osmium.SimpleHandler):
         verde = leisure in VERDE_LEISURE or landuse in VERDE_LANDUSE or natural in VERDE_NATURAL
         confine = t.get('boundary') == 'administrative' and t.get('admin_level') == '8'
         edificio = edificio is not None and edificio != 'no'
-        if not (edificio or acqua or verde or confine):
+        luogo = t.get('aeroway') == 'aerodrome' or chiave_luogo(t) is not None
+        if not (edificio or acqua or verde or confine or luogo):
             return
         poligoni = []
         try:
@@ -273,6 +364,11 @@ class Lettore(osmium.SimpleHandler):
         wkb = wkb_multipoligono(poligoni)
         rq = riquadro_di([p for pol in poligoni for p in pol[0]])
         ident = a.orig_id() * (1 if a.from_way() else -1)  # le relazioni con segno meno: non si confondono con le vie
+        if luogo:
+            # il punto al centro dell'area più grande (per un aeroporto, la pista principale non conta: conta il recinto)
+            grande = max((pol[0] for pol in poligoni), key=lambda an: abs(sum(x0 * y1 - x1 * y0 for (x0, y0), (x1, y1) in zip(an, an[1:]))))
+            x, y = centro(grande)
+            self.luogo(t, a.orig_id(), 'w' if a.from_way() else 'r', x, y)
         if edificio:
             piani = numero(t.get('building:levels'), intero=True)
             self.s.aggiungi('edifici', rq, wkb, (ident, piani, numero(t.get('height')), (t.get('building') or '')[:40], numero(t.get('roof:levels'), intero=True)))
@@ -293,7 +389,9 @@ def main():
     # la data dell'estratto (quella di Geofabrik, conservata da curl -R): sempre la stessa per lo stesso estratto
     data = time.strftime('%Y-%m-%dT%H:%M:%S.000Z', time.gmtime(os.path.getmtime(estratto)))
     scrittore = Scrittore(uscita, data)
-    Lettore(scrittore).apply_file(estratto, locations=True, idx='flex_mem')
+    # i nodi senza etichette (quasi tutti) non arrivano a node(): le loro posizioni servono lo stesso a vie e aree,
+    # perché il filtro agisce dopo il registro delle posizioni (prova del 13/11: stessi conteggi, 30 volte più veloce)
+    Lettore(scrittore).apply_file(estratto, locations=True, idx='flex_mem', filters=[osmium.filter.EmptyTagFilter().enable_for(osmium.osm.NODE)])
     scrittore.chiudi()
     with open(conteggi, 'w', encoding='utf-8') as f:
         json.dump(scrittore.conteggi, f, ensure_ascii=False, sort_keys=True)

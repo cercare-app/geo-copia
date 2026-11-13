@@ -19,7 +19,7 @@ Il repository è pubblico perché per GitHub i minuti dei repository pubblici so
 
   Il **mare** fa lo stesso con i poligoni del mare di [osmdata.openstreetmap.de](https://osmdata.openstreetmap.de/data/water-polygons.html), ricavati da OpenStreetMap (in OpenStreetMap il mare è una linea di costa, non un'area). `mare.py` li ritaglia sull'Italia e li taglia a quadretti di circa 5 km.
 
-  Alla fine della corsa, fra i file scaricabili, c'è il pacchetto **«campioni»**: un quadrato di 2 km intorno a ogni posto di `campioni.txt`, per provare le mappe su posti veri. Resta 90 giorni, non va né sul sito né su reesty e non ferma mai la copia. In `campioni.txt` vanno solo posti pubblici, mai l'indirizzo di un cliente.
+  Alla fine della corsa, fra i file scaricabili, c'è il pacchetto **«campioni»**: un quadrato di 2 km intorno a ogni posto di `campioni.txt` (12 km per i luoghi, 300 km per gli aeroporti), per provare le mappe e i dintorni su posti veri. Resta 90 giorni, non va né sul sito né su reesty e non ferma mai la copia. In `campioni.txt` vanno solo posti pubblici, mai l'indirizzo di un cliente.
 
   Con «Run workflow» la si lancia anche a mano, per una regione sola o in sola misura.
 - **Battito** (`battito.yml`), una volta al mese, scrive la data in `battito.txt`. Senza attività nel repository, GitHub spegne le corse a calendario dopo 60 giorni.
@@ -40,12 +40,16 @@ Gli strati sono tutti in latitudine e longitudine (EPSG:4326), ognuno con il suo
 | verde | poligoni | id, nome, tipo |
 | ferrovie | linee | id, tipo, galleria, livello |
 | confini | poligoni (comuni) | id, nome, istat |
+| luoghi | punti | id, osm, chiave, nome, gestore, etichette |
+| aeroporti | punti | id, osm, nome, nome_it, iata |
 | mare (file `osm-mare`) | poligoni | id, tipo |
 
 - `tipo` degli edifici è il valore di `building` (per esempio `roof` per tettoie e pensiline); `piani_tetto` viene da `roof:levels`.
 - `altri_nomi` delle strade: nome italiano, tedesco, ufficiale, altri nomi, separati da «;».
 - `galleria` è il valore di `tunnel` (per esempio `yes`, `building_passage`); `livello` quello di `layer`.
 - Nel verde ci sono anche i campi sportivi.
+- I **luoghi** sono quelli dei dintorni: supermercati e altri negozi di alimentari, farmacie, scuole e asili, ospedali, banche, bar e ristoranti, fermate di autobus e tram, stazioni e metropolitana, parchi, spiagge. Un luogo disegnato come area diventa il punto al suo centro. `osm` dice se viene da un nodo (`n`), da una via (`w`) o da una relazione (`r`); `chiave` è l'etichetta che lo fa entrare (per esempio `amenity=pharmacy`); `etichette` le altre che servono a riconoscerlo (per esempio `station=subway`, `dispensing=no`). Servono alla verifica dei dintorni, non alle mappe.
+- Negli **aeroporti** ci sono tutti gli aerodromi; `iata` è il codice di tre lettere, solo per quelli che lo hanno.
 
 Dati © contributori OpenStreetMap, licenza ODbL (anche il mare). Fibra: BroadbandMap di AGCOM, CC BY 4.0.
 
