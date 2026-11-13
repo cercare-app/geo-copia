@@ -1,0 +1,14 @@
+# I CAMPIONI PER LE PROVE DELLE MAPPE (lotto «Valutazione 4», D-VAL-103)
+# Una riga per posto: nome;latitudine;longitudine;che cosa mette alla prova
+# Intorno a ogni posto la copia ritaglia un quadrato di 2 km di lato, che resta 90 giorni
+# fra i file scaricabili della corsa («campioni»). Non va né sul sito né su reesty.
+# SOLO POSTI PUBBLICI SCELTI DA NOI: MAI L'INDIRIZZO DI UN CLIENTE (il repository è pubblico).
+torino-foscolo;45.04795;7.67511;il fac-simile, l'isolato intero, il passante ferroviario in galleria
+milano-duomo;45.4642;9.1900;isolati del centro, metropolitana in galleria
+venezia-cannaregio;45.4446;12.3263;canali, niente strade
+bolzano-centro;46.4983;11.3548;nomi delle vie in italiano e in tedesco
+napoli-quartieri-spagnoli;40.8425;14.2455;vicoli stretti, edifici fitti
+forte-dei-marmi;43.9600;10.1700;il mare
+castelmezzano;40.5297;16.0453;un borgo dell'Appennino lucano, pochi dati in OpenStreetMap
+roma-gianicolo;41.9000;12.4630;strade in galleria e sottopassi
+bologna-barbieri;44.5168;11.34601;la Bolognina, i binari dell'alta velocità in galleria

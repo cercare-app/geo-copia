@@ -7,13 +7,19 @@ prove) e scrive un GeoPackage con solo gli strati che servono alle mappe
 del report, ognuno col suo indice spaziale R-tree, in latitudine e
 longitudine (EPSG:4326):
 
-  edifici      poligoni   id, piani, altezza
-  strade       linee      id, nome, tipo
+  edifici      poligoni   id, piani, altezza, tipo, piani_tetto
+  strade       linee      id, nome, tipo, altri_nomi, galleria, livello
   acqua        poligoni   id, nome, tipo
   corsi_acqua  linee      id, nome, tipo
   verde        poligoni   id, nome, tipo
-  ferrovie     linee      id, tipo
+  ferrovie     linee      id, tipo, galleria, livello
   confini      poligoni   id, nome, istat   (comuni: admin_level 8)
+
+Lotto «Valutazione 4» (D-VAL-94): il tipo di edificio (per togliere
+tettoie e pensiline dalla vista dall'alto), i piani del tetto, gli altri
+nomi delle vie (nome italiano, tedesco, ufficiale…, separati da «;»: per
+trovare la via dell'indirizzo), la galleria e il livello di strade e
+ferrovie (per disegnare le gallerie più chiare), i campi sportivi nel verde.
 
 Scrive anche conteggi.json (oggetti per strato), che il servizio su reesty
 ricontrolla prima di usare il file. Niente luoghi e negozi: i dintorni
@@ -39,21 +45,24 @@ SRS = 4326
 
 # strato: (tipo di forma, [(colonna, tipo SQL)])
 STRATI = {
-    'edifici': ('MULTIPOLYGON', [('id', 'INTEGER'), ('piani', 'INTEGER'), ('altezza', 'REAL')]),
-    'strade': ('LINESTRING', [('id', 'INTEGER'), ('nome', 'TEXT'), ('tipo', 'TEXT')]),
+    'edifici': ('MULTIPOLYGON', [('id', 'INTEGER'), ('piani', 'INTEGER'), ('altezza', 'REAL'), ('tipo', 'TEXT'), ('piani_tetto', 'INTEGER')]),
+    'strade': ('LINESTRING', [('id', 'INTEGER'), ('nome', 'TEXT'), ('tipo', 'TEXT'), ('altri_nomi', 'TEXT'), ('galleria', 'TEXT'), ('livello', 'INTEGER')]),
     'acqua': ('MULTIPOLYGON', [('id', 'INTEGER'), ('nome', 'TEXT'), ('tipo', 'TEXT')]),
     'corsi_acqua': ('LINESTRING', [('id', 'INTEGER'), ('nome', 'TEXT'), ('tipo', 'TEXT')]),
     'verde': ('MULTIPOLYGON', [('id', 'INTEGER'), ('nome', 'TEXT'), ('tipo', 'TEXT')]),
-    'ferrovie': ('LINESTRING', [('id', 'INTEGER'), ('tipo', 'TEXT')]),
+    'ferrovie': ('LINESTRING', [('id', 'INTEGER'), ('tipo', 'TEXT'), ('galleria', 'TEXT'), ('livello', 'INTEGER')]),
     'confini': ('MULTIPOLYGON', [('id', 'INTEGER'), ('nome', 'TEXT'), ('istat', 'TEXT')]),
 }
 
 STRADE_NO = {'proposed', 'construction', 'abandoned', 'platform', 'raceway', 'bus_stop', 'elevator', 'corridor', 'razed'}
 CORSI = {'river', 'stream', 'canal', 'drain', 'ditch'}
 FERROVIE = {'rail', 'light_rail', 'subway', 'tram', 'narrow_gauge', 'monorail', 'funicular'}
-VERDE_LEISURE = {'park', 'garden', 'nature_reserve', 'recreation_ground', 'golf_course', 'playground', 'dog_park'}
+VERDE_LEISURE = {'park', 'garden', 'nature_reserve', 'recreation_ground', 'golf_course', 'playground', 'dog_park', 'pitch'}
 VERDE_LANDUSE = {'grass', 'forest', 'meadow', 'recreation_ground', 'village_green', 'allotments', 'orchard', 'vineyard', 'cemetery', 'flowerbed'}
 VERDE_NATURAL = {'wood', 'scrub', 'grassland', 'heath'}
+
+# gli altri nomi di una via, in quest'ordine (alt_name e simili possono averne più d'uno, separati da «;»)
+ALTRI_NOMI = ('name:it', 'name:de', 'name:lld', 'name:fr', 'name:sl', 'official_name', 'alt_name', 'short_name', 'loc_name', 'old_name')
 
 LOTTO = 20000
 
@@ -70,6 +79,34 @@ def numero(testo, intero=False):
     if not math.isfinite(v) or v < 0 or v > 1000:
         return None
     return int(round(v)) if intero else round(v, 2)
+
+
+def altri_nomi(t):
+    """Gli altri nomi della via, senza doppioni e senza il nome principale, separati da «;»; altrimenti None."""
+    principale = (t.get('name') or '').strip()
+    visti, nomi = {principale.lower()}, []
+    for chiave in ALTRI_NOMI:
+        for nome in (t.get(chiave) or '').split(';'):
+            nome = nome.strip()
+            if nome and nome.lower() not in visti and len(nome) <= 200:
+                visti.add(nome.lower())
+                nomi.append(nome)
+    return ';'.join(nomi) if nomi else None
+
+
+def galleria(t):
+    """Il valore di «tunnel» (yes, building_passage, culvert…) se la via è in galleria; altrimenti None."""
+    v = (t.get('tunnel') or '').strip()
+    return v[:40] if v and v != 'no' else None
+
+
+def livello(t):
+    """Il livello («layer») come numero intero da -10 a 10; altrimenti None."""
+    try:
+        v = int((t.get('layer') or '').strip())
+    except ValueError:
+        return None
+    return v if -10 <= v <= 10 else None
 
 
 def wkb_linea(punti):
@@ -93,8 +130,9 @@ def blocco_gpkg(wkb, riquadro):
 
 
 class Scrittore:
-    def __init__(self, percorso, data):
+    def __init__(self, percorso, data, strati=None):
         self.data = data
+        self.strati = STRATI if strati is None else strati
         if os.path.exists(percorso):
             os.remove(percorso)
         self.db = sqlite3.connect(percorso)
@@ -124,7 +162,7 @@ class Scrittore:
         self.code = {}
         self.conteggi = {}
         self.riquadri = {}
-        for nome, (tipo, colonne) in STRATI.items():
+        for nome, (tipo, colonne) in self.strati.items():
             definizione = ', '.join('"%s" %s' % (c, t) for c, t in colonne)
             self.db.execute('CREATE TABLE "%s" (fid INTEGER PRIMARY KEY AUTOINCREMENT, geom %s, %s)' % (nome, tipo, definizione))
             self.db.execute('INSERT INTO gpkg_geometry_columns VALUES (?, ?, ?, ?, 0, 0)', (nome, 'geom', tipo, SRS))
@@ -144,12 +182,12 @@ class Scrittore:
         righe = self.code[strato]
         if not righe:
             return
-        colonne = ['geom'] + [c for c, _ in STRATI[strato][1]]
+        colonne = ['geom'] + [c for c, _ in self.strati[strato][1]]
         self.db.executemany('INSERT INTO "%s" (%s) VALUES (%s)' % (strato, ', '.join('"%s"' % c for c in colonne), ', '.join('?' * len(colonne))), righe)
         self.code[strato] = []
 
     def chiudi(self):
-        for nome, (tipo, _) in STRATI.items():
+        for nome, (tipo, _) in self.strati.items():
             self.scarica(nome)
             r = self.riquadri[nome]
             vuoto = not math.isfinite(r[0])
@@ -202,11 +240,11 @@ class Lettore(osmium.SimpleHandler):
         wkb = wkb_linea(punti)
         rq = riquadro_di(punti)
         if strada and strada not in STRADE_NO:
-            self.s.aggiungi('strade', rq, wkb, (w.id, t.get('name'), strada))
+            self.s.aggiungi('strade', rq, wkb, (w.id, t.get('name'), strada, altri_nomi(t), galleria(t), livello(t)))
         if corso in CORSI:
             self.s.aggiungi('corsi_acqua', rq, wkb, (w.id, t.get('name'), corso))
         if ferrovia in FERROVIE:
-            self.s.aggiungi('ferrovie', rq, wkb, (w.id, ferrovia))
+            self.s.aggiungi('ferrovie', rq, wkb, (w.id, ferrovia, galleria(t), livello(t)))
 
     def area(self, a):
         t = a.tags
@@ -237,7 +275,7 @@ class Lettore(osmium.SimpleHandler):
         ident = a.orig_id() * (1 if a.from_way() else -1)  # le relazioni con segno meno: non si confondono con le vie
         if edificio:
             piani = numero(t.get('building:levels'), intero=True)
-            self.s.aggiungi('edifici', rq, wkb, (ident, piani, numero(t.get('height'))))
+            self.s.aggiungi('edifici', rq, wkb, (ident, piani, numero(t.get('height')), (t.get('building') or '')[:40], numero(t.get('roof:levels'), intero=True)))
         if acqua:
             self.s.aggiungi('acqua', rq, wkb, (ident, t.get('name'), t.get('water') or natural or landuse or 'acqua'))
         if verde:

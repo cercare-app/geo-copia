@@ -10,12 +10,16 @@ Il repository è pubblico perché per GitHub i minuti dei repository pubblici so
   - quando questi file arrivano su GitHub;
   - poi il 5 di gennaio, aprile, luglio e ottobre alle 03:00 UTC.
 
-  Lavora le cinque regioni di Geofabrik (nord-ovest, nord-est, centro, sud, isole) tutte insieme. Per ogni regione:
+  Lavora le cinque regioni di Geofabrik (nord-ovest, nord-est, centro, sud, isole) e il mare, tutti insieme. Per ogni regione:
   1. scarica l'estratto e ne controlla l'impronta;
   2. lo converte con `converti.py`;
   3. lo pesa: oltre la soglia si ferma e non carica niente;
   4. lo carica col nome provvisorio;
   5. chiede al servizio di controllarlo prima di usarlo. L'edizione precedente resta come scorta.
+
+  Il **mare** fa lo stesso con i poligoni del mare di [osmdata.openstreetmap.de](https://osmdata.openstreetmap.de/data/water-polygons.html), ricavati da OpenStreetMap (in OpenStreetMap il mare è una linea di costa, non un'area). `mare.py` li ritaglia sull'Italia e li taglia a quadretti di circa 5 km.
+
+  Alla fine della corsa, fra i file scaricabili, c'è il pacchetto **«campioni»**: un quadrato di 2 km intorno a ogni posto di `campioni.txt`, per provare le mappe su posti veri. Resta 90 giorni, non va né sul sito né su reesty e non ferma mai la copia. In `campioni.txt` vanno solo posti pubblici, mai l'indirizzo di un cliente.
 
   Con «Run workflow» la si lancia anche a mano, per una regione sola o in sola misura.
 - **Battito** (`battito.yml`), una volta al mese, scrive la data in `battito.txt`. Senza attività nel repository, GitHub spegne le corse a calendario dopo 60 giorni.
@@ -29,15 +33,21 @@ Gli strati sono tutti in latitudine e longitudine (EPSG:4326), ognuno con il suo
 
 | Strato | Forma | Colonne |
 |---|---|---|
-| edifici | poligoni | id, piani, altezza |
-| strade | linee | id, nome, tipo |
+| edifici | poligoni | id, piani, altezza, tipo, piani_tetto |
+| strade | linee | id, nome, tipo, altri_nomi, galleria, livello |
 | acqua | poligoni | id, nome, tipo |
 | corsi_acqua | linee | id, nome, tipo |
 | verde | poligoni | id, nome, tipo |
-| ferrovie | linee | id, tipo |
+| ferrovie | linee | id, tipo, galleria, livello |
 | confini | poligoni (comuni) | id, nome, istat |
+| mare (file `osm-mare`) | poligoni | id, tipo |
 
-Dati © contributori OpenStreetMap, licenza ODbL. Fibra: BroadbandMap di AGCOM, CC BY 4.0.
+- `tipo` degli edifici è il valore di `building` (per esempio `roof` per tettoie e pensiline); `piani_tetto` viene da `roof:levels`.
+- `altri_nomi` delle strade: nome italiano, tedesco, ufficiale, altri nomi, separati da «;».
+- `galleria` è il valore di `tunnel` (per esempio `yes`, `building_passage`); `livello` quello di `layer`.
+- Nel verde ci sono anche i campi sportivi.
+
+Dati © contributori OpenStreetMap, licenza ODbL (anche il mare). Fibra: BroadbandMap di AGCOM, CC BY 4.0.
 
 ## Che cosa serve
 
@@ -53,7 +63,13 @@ Dati © contributori OpenStreetMap, licenza ODbL. Fibra: BroadbandMap di AGCOM, 
 |---|---|---|
 | `GEO_FTP_TLS` | `si` | FTP cifrato. Altri valori: `si-senza-verifica`, `no`. |
 | `GEO_PESO_MAX_GB` | `5` | Peso massimo di una regione. |
-| `GEO_REGIONI` | tutte e cinque | Le regioni delle corse automatiche. |
+| `GEO_REGIONI` | tutte e cinque e il mare | Le regioni delle corse automatiche (`mare` per il mare). |
+| `GEO_TENTATIVI` | `6` | Quante volte riprovare un download che non arriva intero. |
+| `GEO_ATTESA_MINUTI` | `10` | I minuti fra un tentativo e l'altro. |
+| `GEO_MARE_FONTE` | i poligoni del mare di osmdata | Da dove scaricare i poligoni del mare. |
+| `GEO_MARE_RIQUADRO` | `6.5 35.3 18.6 47.1` | Il riquadro del mare da tenere: ovest, sud, est, nord. |
+| `GEO_MARE_CELLA` | `0.05` | Il lato dei quadretti del mare, in gradi. |
+| `GEO_CAMPIONI_KM` | `2` | Il lato dei campioni, in km. |
 | `GEO_SITO` | `https://portale.reesty.it` | L'indirizzo del sito che ospita il servizio. |
 | `GEO_CARTELLE` | `geo geo-prova` | Dove cercare il servizio. |
 | `GEO_DATI` | `geo/dati` | La cartella dei dati. |
