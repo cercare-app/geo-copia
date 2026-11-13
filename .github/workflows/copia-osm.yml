@@ -6,6 +6,11 @@ name: Copia OpenStreetMap
 #  - le cinque regioni di Geofabrik insieme: ognuna si scarica, si converte, si pesa e,
 #    sotto la soglia, va su reesty; il servizio la controlla e la mette al suo posto
 #    (la precedente resta come scorta). Se una regione non va, diventa rossa solo lei.
+# Lotto «Valutazione 4» (D-VAL-94, D-VAL-95, D-VAL-103):
+#  - insieme alle regioni anche il «mare» (i poligoni del mare, ritagliati sull'Italia);
+#  - da ogni regione e dal mare si ritagliano i campioni dei posti di campioni.txt: alla fine
+#    sono tutti in un solo pacchetto, «campioni», fra i file scaricabili della corsa (90 giorni).
+#    I campioni non vanno né sul sito né su reesty e non fermano mai la copia.
 # Il pulsante «Run workflow» resta per lanciarla quando serve, anche per una regione sola
 # o in sola misura. Repository pubblico: i minuti non si contano. I registri li può leggere
 # chiunque: qui non si stampano mai indirizzi, utenti o chiavi.
@@ -18,15 +23,19 @@ on:
       - 'cliente.py'
       - 'carica.sh'
       - 'fai-regione.sh'
+      - 'fai-mare.sh'
+      - 'mare.py'
+      - 'campioni.py'
+      - 'campioni.txt'
       - '.github/workflows/copia-osm.yml'
   schedule:
     - cron: '0 3 5 1,4,7,10 *'
   workflow_dispatch:
     inputs:
       regioni:
-        description: 'Regioni, separate da spazi'
+        description: 'Regioni, separate da spazi («mare» per il mare)'
         required: true
-        default: 'centro isole nord-est nord-ovest sud'
+        default: 'centro isole nord-est nord-ovest sud mare'
       carica:
         description: 'Caricare su reesty (togli la spunta per la sola misura)'
         type: boolean
@@ -47,7 +56,7 @@ jobs:
     steps:
       - id: r
         env:
-          SCELTE: ${{ inputs.regioni || vars.GEO_REGIONI || 'centro isole nord-est nord-ovest sud' }}
+          SCELTE: ${{ inputs.regioni || vars.GEO_REGIONI || 'centro isole nord-est nord-ovest sud mare' }}
         run: |
           python3 -c "
           import json, os, re, sys
@@ -74,7 +83,7 @@ jobs:
           python-version: '3.12'
 
       - name: Strumenti
-        run: pip install --quiet 'osmium>=4,<5'
+        run: pip install --quiet 'osmium>=4,<5' 'shapely>=2,<3' 'pyshp>=3,<4'
 
       - name: Copia della regione
         env:
@@ -89,7 +98,49 @@ jobs:
           GEO_FTP_RADICE: ${{ vars.GEO_FTP_RADICE }}
           GEO_FTP_TLS: ${{ vars.GEO_FTP_TLS }}
           GEO_PESO_MAX_GB: ${{ vars.GEO_PESO_MAX_GB }}
+          GEO_TENTATIVI: ${{ vars.GEO_TENTATIVI }}
+          GEO_ATTESA_MINUTI: ${{ vars.GEO_ATTESA_MINUTI }}
+          GEO_MARE_FONTE: ${{ vars.GEO_MARE_FONTE }}
+          GEO_MARE_RIQUADRO: ${{ vars.GEO_MARE_RIQUADRO }}
+          GEO_MARE_CELLA: ${{ vars.GEO_MARE_CELLA }}
         # i file caricati dal sito di GitHub possono avere gli a capo di Windows: per bash si tolgono
         run: |
           sed -i 's/\r$//' ./*.sh
-          bash fai-regione.sh "${{ matrix.regione }}"
+          if [ "${{ matrix.regione }}" = "mare" ]; then
+            bash fai-mare.sh
+          else
+            bash fai-regione.sh "${{ matrix.regione }}"
+          fi
+
+      # i campioni si ritagliano anche se il caricamento non è andato (il file c'è comunque)
+      - name: Campioni per le prove
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        env:
+          LATO: ${{ vars.GEO_CAMPIONI_KM || '2' }}
+        run: |
+          python3 campioni.py "$RUNNER_TEMP/osm-${{ matrix.regione }}/osm-${{ matrix.regione }}.gpkg" campioni.txt "$RUNNER_TEMP/campioni" "${{ matrix.regione }}" "$LATO"
+
+      - name: Salva i campioni
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: campioni-${{ matrix.regione }}
+          path: ${{ runner.temp }}/campioni/*.gpkg
+          if-no-files-found: ignore
+          retention-days: 90
+
+  campioni:
+    needs: regione
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Un solo pacchetto «campioni»
+        uses: actions/upload-artifact/merge@v4
+        with:
+          name: campioni
+          pattern: campioni-*
+          delete-merged: true
+          retention-days: 90
